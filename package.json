@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "node server.js",
-    "start": "NODE_ENV=production node server.js"
+    "start": "NODE_ENV=production node server.js",
+    "tunnel": "node tunnel.js"
   },
   "keywords": [
     "openai",
@@ -22,6 +23,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
-    "openai": "^4.57.0"
+    "openai": "^4.57.0",
+    "localtunnel": "^2.0.2"
   }
 }

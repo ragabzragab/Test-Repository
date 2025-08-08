@@ -9,7 +9,12 @@
 <body>
   <header>
     <h1>OpenAI Top 10 API Demo</h1>
-    <p>Enter your input and try the APIs. Set your <code>OPENAI_API_KEY</code> in the server environment.</p>
+    <p>Enter your input and try the APIs. Set your <code>OPENAI_API_KEY</code> in the server environment or paste it below (stored only in your browser).</p>
+    <div class="keybox">
+      <input id="api_key" placeholder="Paste your OpenAI API Key (sk-...)" />
+      <button id="save_key">Save Key</button>
+      <span id="key_status"></span>
+    </div>
   </header>
 
   <main id="app">

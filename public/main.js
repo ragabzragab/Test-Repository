@@ -1,7 +1,32 @@
+function getApiKey() {
+  return localStorage.getItem('openai_key') || '';
+}
+function setApiKey(k) {
+  localStorage.setItem('openai_key', k);
+}
+
+const savedKeyInput = document.getElementById('api_key');
+const saveKeyBtn = document.getElementById('save_key');
+const keyStatus = document.getElementById('key_status');
+
+if (savedKeyInput) {
+  savedKeyInput.value = getApiKey();
+}
+if (saveKeyBtn) {
+  saveKeyBtn.onclick = () => {
+    setApiKey(savedKeyInput.value.trim());
+    keyStatus.textContent = savedKeyInput.value ? 'Saved locally' : 'Cleared';
+    setTimeout(() => keyStatus.textContent = '', 2000);
+  };
+}
+
 async function postJSON(url, data) {
+  const headers = { 'Content-Type': 'application/json' };
+  const key = getApiKey();
+  if (key) headers['x-openai-key'] = key;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(data)
   });
   if (!res.ok) throw new Error(await res.text());
@@ -88,7 +113,8 @@ imgeditBtn.onclick = async () => {
     fd.append('prompt', prompt);
     if (imgFile) fd.append('image', imgFile);
     if (maskFile) fd.append('mask', maskFile);
-    const res = await fetch('/api/images/edit', { method: 'POST', body: fd });
+    const key = getApiKey();
+    const res = await fetch('/api/images/edit', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
     const resp = await res.json();
     out.textContent = '';
     const data = resp.data?.[0];
@@ -115,7 +141,8 @@ imgvarBtn.onclick = async () => {
     const imgFile = document.getElementById('imgvar_image').files[0];
     const fd = new FormData();
     if (imgFile) fd.append('image', imgFile);
-    const res = await fetch('/api/images/variations', { method: 'POST', body: fd });
+    const key = getApiKey();
+    const res = await fetch('/api/images/variations', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
     const resp = await res.json();
     out.textContent = '';
     const data = resp.data?.[0];
@@ -142,7 +169,8 @@ sttBtn.onclick = async () => {
     const audioFile = document.getElementById('stt_audio').files[0];
     const fd = new FormData();
     if (audioFile) fd.append('audio', audioFile);
-    const res = await fetch('/api/audio/transcriptions', { method: 'POST', body: fd });
+    const key = getApiKey();
+    const res = await fetch('/api/audio/transcriptions', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
     const resp = await res.json();
     showJSON(out, resp);
   } catch (e) { out.textContent = e.message; }
@@ -153,9 +181,12 @@ const ttsBtn = document.getElementById('tts_btn');
 ttsBtn.onclick = async () => {
   const audio = document.getElementById('tts_audio');
   const text = document.getElementById('tts_text').value || 'Hello from OpenAI TTS';
+  const headers = { 'Content-Type': 'application/json' };
+  const key = getApiKey();
+  if (key) headers['x-openai-key'] = key;
   const res = await fetch('/api/audio/speech', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ input: text })
   });
   const blob = await res.blob();
