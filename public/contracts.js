@@ -10,28 +10,52 @@ let deletingId = null;
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
+function esc(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 function fmt(date) {
-  if (!date) return '—';
+  if (!date) return '\u2014';
   return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function fmtMoney(value, currency = 'USD') {
-  if (!value) return '—';
+  if (!value) return '\u2014';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 }
 
 function statusBadge(status) {
-  return `<span class="badge badge-${status}">${status}</span>`;
+  return `<span class="badge badge-${esc(status)}">${esc(status)}</span>`;
 }
 
 function typeBadge(type) {
-  return `<span class="badge badge-type">${type}</span>`;
+  return `<span class="badge badge-type">${esc(type)}</span>`;
 }
 
 function daysUntil(dateStr) {
   if (!dateStr) return null;
-  const diff = new Date(dateStr) - new Date();
+  const target = new Date(dateStr + 'T23:59:59');
+  const now = new Date();
+  const diff = target - now;
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+// ── Toast Notifications ─────────────────────────────────────────────────────
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3500);
 }
 
 // ── API Calls ────────────────────────────────────────────────────────────────
@@ -61,7 +85,7 @@ async function loadStats() {
     document.getElementById('stat-value').querySelector('.stat-value').textContent =
       stats.totalValue ? fmtMoney(stats.totalValue) : '$0';
   } catch (e) {
-    console.error('Failed to load stats', e);
+    showToast('Failed to load dashboard stats', 'error');
   }
 }
 
@@ -79,10 +103,10 @@ async function loadExpiring() {
       const days = daysUntil(c.endDate);
       const urgency = days <= 7 ? 'urgent' : days <= 14 ? 'warning' : '';
       return `
-        <div class="expiring-item ${urgency}" onclick="viewContract('${c.id}')">
+        <div class="expiring-item ${urgency}" onclick="viewContract('${esc(c.id)}')">
           <div class="expiring-info">
-            <span class="expiring-number">${c.contractNumber}</span>
-            <span class="expiring-title">${c.title}</span>
+            <span class="expiring-number">${esc(c.contractNumber)}</span>
+            <span class="expiring-title">${esc(c.title)}</span>
           </div>
           <div class="expiring-meta">
             <span>${fmt(c.endDate)}</span>
@@ -111,7 +135,8 @@ async function loadContracts() {
     renderTable();
   } catch (e) {
     document.getElementById('contracts-tbody').innerHTML =
-      `<tr><td colspan="9" class="empty-row error">Error: ${e.message}</td></tr>`;
+      `<tr><td colspan="9" class="empty-row error">Failed to load contracts. Is the server running?</td></tr>`;
+    showToast('Failed to load contracts: ' + e.message, 'error');
   }
 }
 
@@ -129,7 +154,7 @@ function renderTable() {
   });
 
   if (sorted.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">No contracts found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">No contracts found. Click "+ New Contract" to create one.</td></tr>';
     return;
   }
 
@@ -137,25 +162,25 @@ function renderTable() {
     const days = c.endDate && c.status === 'active' ? daysUntil(c.endDate) : null;
     const endDisplay = c.endDate
       ? `${fmt(c.endDate)}${days !== null && days <= 30 && days > 0 ? ` <span class="soon">${days}d</span>` : ''}`
-      : '—';
+      : '\u2014';
     const parties = c.parties?.length
-      ? c.parties.slice(0, 2).map(p => `<span class="party-chip">${p.name}</span>`).join('') +
+      ? c.parties.slice(0, 2).map(p => `<span class="party-chip">${esc(p.name)}</span>`).join('') +
         (c.parties.length > 2 ? `<span class="party-chip more">+${c.parties.length - 2}</span>` : '')
-      : '—';
+      : '\u2014';
 
     return `
-      <tr class="contract-row" onclick="viewContract('${c.id}')">
-        <td class="mono">${c.contractNumber || '—'}</td>
-        <td class="title-cell">${c.title}</td>
+      <tr class="contract-row" onclick="viewContract('${esc(c.id)}')">
+        <td class="mono">${esc(c.contractNumber) || '\u2014'}</td>
+        <td class="title-cell">${esc(c.title)}</td>
         <td>${typeBadge(c.type)}</td>
         <td>${statusBadge(c.status)}</td>
         <td>${fmt(c.startDate)}</td>
         <td>${endDisplay}</td>
-        <td class="mono">${c.value ? fmtMoney(c.value, c.currency) : '—'}</td>
+        <td class="mono">${c.value ? fmtMoney(c.value, c.currency) : '\u2014'}</td>
         <td class="parties-cell">${parties}</td>
         <td class="actions-cell" onclick="event.stopPropagation()">
-          <button class="btn-icon" onclick="editContract('${c.id}')" title="Edit">&#9998;</button>
-          <button class="btn-icon danger" onclick="confirmDelete('${c.id}')" title="Delete">&#128465;</button>
+          <button class="btn-icon" onclick="editContract('${esc(c.id)}')" title="Edit">&#9998;</button>
+          <button class="btn-icon danger" onclick="confirmDelete('${esc(c.id)}')" title="Delete">&#128465;</button>
         </td>
       </tr>`;
   }).join('');
@@ -194,13 +219,13 @@ function viewContract(id) {
         </div>
         <div class="detail-item">
           <div class="detail-label">Contract #</div>
-          <div class="mono">${c.contractNumber || '—'}</div>
+          <div class="mono">${esc(c.contractNumber) || '\u2014'}</div>
         </div>
       </div>
       <div class="detail-row">
         <div class="detail-item">
           <div class="detail-label">Value</div>
-          <div>${c.value ? fmtMoney(c.value, c.currency) : '—'}</div>
+          <div>${c.value ? fmtMoney(c.value, c.currency) : '\u2014'}</div>
         </div>
         <div class="detail-item">
           <div class="detail-label">Start Date</div>
@@ -211,18 +236,18 @@ function viewContract(id) {
           <div>${fmt(c.endDate)}</div>
         </div>
       </div>
-      ${c.description ? `<div class="detail-full"><div class="detail-label">Description</div><div>${c.description}</div></div>` : ''}
-      ${c.notes ? `<div class="detail-full"><div class="detail-label">Notes</div><div>${c.notes}</div></div>` : ''}
-      ${c.tags?.length ? `<div class="detail-full"><div class="detail-label">Tags</div><div>${c.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div></div>` : ''}
+      ${c.description ? `<div class="detail-full"><div class="detail-label">Description</div><div>${esc(c.description)}</div></div>` : ''}
+      ${c.notes ? `<div class="detail-full"><div class="detail-label">Notes</div><div>${esc(c.notes)}</div></div>` : ''}
+      ${c.tags?.length ? `<div class="detail-full"><div class="detail-label">Tags</div><div>${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div></div>` : ''}
       ${c.parties?.length ? `
         <div class="detail-full">
           <div class="detail-label">Parties</div>
           <div class="parties-detail">
             ${c.parties.map(p => `
               <div class="party-card">
-                <div class="party-name">${p.name}</div>
-                <div class="party-role">${p.role}</div>
-                ${p.email ? `<div class="party-email">${p.email}</div>` : ''}
+                <div class="party-name">${esc(p.name)}</div>
+                <div class="party-role">${esc(p.role)}</div>
+                ${p.email ? `<div class="party-email">${esc(p.email)}</div>` : ''}
               </div>`).join('')}
           </div>
         </div>` : ''}
@@ -242,14 +267,17 @@ function addPartyRow(party = {}) {
   const div = document.createElement('div');
   div.className = 'party-row';
   div.innerHTML = `
-    <input type="text" placeholder="Name" class="party-name" value="${party.name || ''}" />
+    <input type="text" placeholder="Name" class="party-name" value="" />
     <select class="party-role">
       ${['client','vendor','employee','employer','landlord','tenant','partner','other']
         .map(r => `<option value="${r}" ${party.role === r ? 'selected' : ''}>${r}</option>`).join('')}
     </select>
-    <input type="email" placeholder="Email (optional)" class="party-email" value="${party.email || ''}" />
-    <button type="button" class="btn-icon danger remove-party">&#10005;</button>
+    <input type="email" placeholder="Email (optional)" class="party-email" value="" />
+    <button type="button" class="btn-icon danger remove-party" aria-label="Remove party">&#10005;</button>
   `;
+  // Set values via DOM to avoid XSS
+  div.querySelector('.party-name').value = party.name || '';
+  div.querySelector('.party-email').value = party.email || '';
   div.querySelector('.remove-party').onclick = () => div.remove();
   document.getElementById('parties-list').appendChild(div);
 }
@@ -265,6 +293,8 @@ function getParties() {
 function openModal(contract = null) {
   editingId = contract?.id || null;
   document.getElementById('modal-title').textContent = contract ? 'Edit Contract' : 'New Contract';
+  document.getElementById('form-error').textContent = '';
+  document.getElementById('form-error').style.display = 'none';
 
   document.getElementById('f-title').value = contract?.title || '';
   document.getElementById('f-type').value = contract?.type || 'service';
@@ -292,8 +322,34 @@ function closeModal() {
   editingId = null;
 }
 
+function validateForm() {
+  const title = document.getElementById('f-title').value.trim();
+  const startDate = document.getElementById('f-start').value;
+  const endDate = document.getElementById('f-end').value;
+  const errEl = document.getElementById('form-error');
+
+  if (!title) {
+    errEl.textContent = 'Title is required.';
+    errEl.style.display = 'block';
+    document.getElementById('f-title').focus();
+    return false;
+  }
+
+  if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+    errEl.textContent = 'End date must be on or after the start date.';
+    errEl.style.display = 'block';
+    document.getElementById('f-end').focus();
+    return false;
+  }
+
+  errEl.style.display = 'none';
+  return true;
+}
+
 async function saveContract(e) {
   e.preventDefault();
+  if (!validateForm()) return;
+
   const payload = {
     title: document.getElementById('f-title').value.trim(),
     type: document.getElementById('f-type').value,
@@ -312,13 +368,15 @@ async function saveContract(e) {
   try {
     if (editingId) {
       await apiFetch(`${API}/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      showToast('Contract updated successfully', 'success');
     } else {
       await apiFetch(API, { method: 'POST', body: JSON.stringify(payload) });
+      showToast('Contract created successfully', 'success');
     }
     closeModal();
     await refresh();
   } catch (err) {
-    alert('Error saving contract: ' + err.message);
+    showToast('Error saving contract: ' + err.message, 'error');
   }
 }
 
@@ -341,10 +399,53 @@ async function deleteContract() {
     document.getElementById('confirm-modal').style.display = 'none';
     document.getElementById('detail-modal').style.display = 'none';
     deletingId = null;
+    showToast('Contract deleted', 'success');
     await refresh();
   } catch (err) {
-    alert('Error deleting contract: ' + err.message);
+    showToast('Error deleting contract: ' + err.message, 'error');
   }
+}
+
+// ── CSV Export ───────────────────────────────────────────────────────────────
+
+function exportCSV() {
+  if (allContracts.length === 0) {
+    showToast('No contracts to export', 'warning');
+    return;
+  }
+
+  const headers = ['Contract #', 'Title', 'Type', 'Status', 'Start Date', 'End Date', 'Value', 'Currency', 'Parties', 'Tags', 'Description', 'Notes', 'Created', 'Updated'];
+  const csvEsc = (val) => {
+    const s = String(val ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const rows = allContracts.map(c => [
+    c.contractNumber,
+    c.title,
+    c.type,
+    c.status,
+    c.startDate || '',
+    c.endDate || '',
+    c.value || '',
+    c.currency,
+    (c.parties || []).map(p => `${p.name} (${p.role})`).join('; '),
+    (c.tags || []).join('; '),
+    c.description,
+    c.notes,
+    c.createdAt,
+    c.updatedAt,
+  ].map(csvEsc).join(','));
+
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `contracts-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${allContracts.length} contract(s) to CSV`, 'success');
 }
 
 // ── Refresh ──────────────────────────────────────────────────────────────────
@@ -356,6 +457,7 @@ async function refresh() {
 // ── Event Listeners ──────────────────────────────────────────────────────────
 
 document.getElementById('add-contract-btn').onclick = () => openModal();
+document.getElementById('export-csv-btn').onclick = exportCSV;
 document.getElementById('modal-close').onclick = closeModal;
 document.getElementById('modal-cancel').onclick = closeModal;
 document.getElementById('contract-form').onsubmit = saveContract;

@@ -1,6 +1,22 @@
-# Build Folders (you can keep bin if you'd like, to store dlls and pdbs)
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Uploaded files (runtime)
+uploads/
+
+# Contract data (runtime — tracked via data/.gitkeep)
+data/contracts.json
+
+# Build artifacts
 bin
 obj
 
-# mstest test results
+# Test results
 TestResults
+
+# OS
+.DS_Store
+Thumbs.db

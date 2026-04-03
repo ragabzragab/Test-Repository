@@ -264,40 +264,72 @@ function generateContractNumber(contracts) {
   return `CNT-${year}-${String(count).padStart(3, '0')}`;
 }
 
+const VALID_STATUSES = ['draft', 'pending', 'active', 'expired', 'terminated'];
+const VALID_TYPES    = ['service', 'employment', 'vendor', 'lease', 'nda', 'partnership', 'other'];
+const VALID_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
+
+function validateContractBody(body) {
+  const errors = [];
+  const title = (body.title || '').trim();
+  if (!title) errors.push('title is required');
+
+  if (body.type && !VALID_TYPES.includes(body.type))
+    errors.push(`type must be one of: ${VALID_TYPES.join(', ')}`);
+
+  if (body.status && !VALID_STATUSES.includes(body.status))
+    errors.push(`status must be one of: ${VALID_STATUSES.join(', ')}`);
+
+  if (body.currency && !VALID_CURRENCIES.includes(body.currency))
+    errors.push(`currency must be one of: ${VALID_CURRENCIES.join(', ')}`);
+
+  if (body.value !== undefined && body.value !== '' && (isNaN(parseFloat(body.value)) || parseFloat(body.value) < 0))
+    errors.push('value must be a non-negative number');
+
+  if (body.startDate && body.endDate && new Date(body.endDate) < new Date(body.startDate))
+    errors.push('endDate must be on or after startDate');
+
+  return errors;
+}
+
+// Returns { contracts, changed } — only write if changed is true
 function autoExpireContracts(contracts) {
   const now = new Date();
-  return contracts.map(c => {
+  let changed = false;
+  const updated = contracts.map(c => {
     if (c.status === 'active' && c.endDate && new Date(c.endDate) < now) {
+      changed = true;
       return { ...c, status: 'expired', updatedAt: now.toISOString() };
     }
     return c;
   });
+  return { contracts: updated, changed };
 }
 
 // GET /api/contracts — list with optional ?status=&type=&search=
 app.get('/api/contracts', (req, res) => {
-  let contracts = autoExpireContracts(readContracts());
-  writeContracts(contracts);
+  const { contracts, changed } = autoExpireContracts(readContracts());
+  if (changed) writeContracts(contracts);
 
+  let filtered = contracts;
   const { status, type, search } = req.query;
-  if (status) contracts = contracts.filter(c => c.status === status);
-  if (type)   contracts = contracts.filter(c => c.type === type);
+  if (status) filtered = filtered.filter(c => c.status === status);
+  if (type)   filtered = filtered.filter(c => c.type === type);
   if (search) {
     const q = search.toLowerCase();
-    contracts = contracts.filter(c =>
+    filtered = filtered.filter(c =>
       c.title?.toLowerCase().includes(q) ||
       c.contractNumber?.toLowerCase().includes(q) ||
       c.parties?.some(p => p.name?.toLowerCase().includes(q))
     );
   }
-  contracts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json(contracts);
+  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(filtered);
 });
 
 // GET /api/contracts/stats — dashboard summary
 app.get('/api/contracts/stats', (req, res) => {
-  const contracts = autoExpireContracts(readContracts());
-  writeContracts(contracts);
+  const { contracts, changed } = autoExpireContracts(readContracts());
+  if (changed) writeContracts(contracts);
 
   const now = new Date();
   const thirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -328,7 +360,8 @@ app.get('/api/contracts/stats', (req, res) => {
 // GET /api/contracts/expiring — contracts expiring within N days (default 30)
 app.get('/api/contracts/expiring', (req, res) => {
   const days = parseInt(req.query.days) || 30;
-  const contracts = autoExpireContracts(readContracts());
+  const { contracts, changed } = autoExpireContracts(readContracts());
+  if (changed) writeContracts(contracts);
   const now = new Date();
   const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   const expiring = contracts.filter(c =>
@@ -349,12 +382,15 @@ app.get('/api/contracts/:id', (req, res) => {
 
 // POST /api/contracts — create
 app.post('/api/contracts', (req, res) => {
+  const errors = validateContractBody(req.body);
+  if (errors.length) return res.status(400).json({ error: errors.join('; ') });
+
   const contracts = readContracts();
   const now = new Date().toISOString();
   const contract = {
     id: generateId(),
     contractNumber: generateContractNumber(contracts),
-    title: req.body.title || 'Untitled Contract',
+    title: req.body.title.trim(),
     type: req.body.type || 'other',
     status: req.body.status || 'draft',
     parties: req.body.parties || [],
@@ -376,6 +412,13 @@ app.post('/api/contracts', (req, res) => {
 
 // PUT /api/contracts/:id — update
 app.put('/api/contracts/:id', (req, res) => {
+  // For updates, treat missing title as a skip (not required), but validate if present
+  const bodyForValidation = req.body.title === undefined
+    ? { ...req.body, title: 'x' }  // skip title required check
+    : req.body;
+  const errors = validateContractBody(bodyForValidation);
+  if (errors.length) return res.status(400).json({ error: errors.join('; ') });
+
   const contracts = readContracts();
   const idx = contracts.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Contract not found' });
