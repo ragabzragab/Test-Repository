@@ -236,6 +236,174 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+// ── Contract Management ────────────────────────────────────────────────────────
+
+const CONTRACTS_FILE = path.join(__dirname, 'data', 'contracts.json');
+
+function readContracts() {
+  try {
+    const raw = fs.readFileSync(CONTRACTS_FILE, 'utf8');
+    return JSON.parse(raw).contracts || [];
+  } catch {
+    return [];
+  }
+}
+
+function writeContracts(contracts) {
+  fs.mkdirSync(path.dirname(CONTRACTS_FILE), { recursive: true });
+  fs.writeFileSync(CONTRACTS_FILE, JSON.stringify({ contracts }, null, 2));
+}
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function generateContractNumber(contracts) {
+  const year = new Date().getFullYear();
+  const count = contracts.filter(c => c.contractNumber?.startsWith(`CNT-${year}`)).length + 1;
+  return `CNT-${year}-${String(count).padStart(3, '0')}`;
+}
+
+function autoExpireContracts(contracts) {
+  const now = new Date();
+  return contracts.map(c => {
+    if (c.status === 'active' && c.endDate && new Date(c.endDate) < now) {
+      return { ...c, status: 'expired', updatedAt: now.toISOString() };
+    }
+    return c;
+  });
+}
+
+// GET /api/contracts — list with optional ?status=&type=&search=
+app.get('/api/contracts', (req, res) => {
+  let contracts = autoExpireContracts(readContracts());
+  writeContracts(contracts);
+
+  const { status, type, search } = req.query;
+  if (status) contracts = contracts.filter(c => c.status === status);
+  if (type)   contracts = contracts.filter(c => c.type === type);
+  if (search) {
+    const q = search.toLowerCase();
+    contracts = contracts.filter(c =>
+      c.title?.toLowerCase().includes(q) ||
+      c.contractNumber?.toLowerCase().includes(q) ||
+      c.parties?.some(p => p.name?.toLowerCase().includes(q))
+    );
+  }
+  contracts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(contracts);
+});
+
+// GET /api/contracts/stats — dashboard summary
+app.get('/api/contracts/stats', (req, res) => {
+  const contracts = autoExpireContracts(readContracts());
+  writeContracts(contracts);
+
+  const now = new Date();
+  const thirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const stats = {
+    total: contracts.length,
+    byStatus: { draft: 0, pending: 0, active: 0, expired: 0, terminated: 0 },
+    totalValue: 0,
+    expiringIn30Days: 0,
+    recentlyAdded: 0,
+  };
+
+  for (const c of contracts) {
+    if (stats.byStatus[c.status] !== undefined) stats.byStatus[c.status]++;
+    stats.totalValue += c.value || 0;
+    if (c.status === 'active' && c.endDate) {
+      const end = new Date(c.endDate);
+      if (end > now && end <= thirtyDays) stats.expiringIn30Days++;
+    }
+    if (c.createdAt && new Date(c.createdAt) > new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)) {
+      stats.recentlyAdded++;
+    }
+  }
+
+  res.json(stats);
+});
+
+// GET /api/contracts/expiring — contracts expiring within N days (default 30)
+app.get('/api/contracts/expiring', (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  const contracts = autoExpireContracts(readContracts());
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  const expiring = contracts.filter(c =>
+    c.status === 'active' && c.endDate &&
+    new Date(c.endDate) > now && new Date(c.endDate) <= cutoff
+  );
+  expiring.sort((a, b) => new Date(a.endDate) - new Date(b.endDate));
+  res.json(expiring);
+});
+
+// GET /api/contracts/:id
+app.get('/api/contracts/:id', (req, res) => {
+  const contracts = readContracts();
+  const contract = contracts.find(c => c.id === req.params.id);
+  if (!contract) return res.status(404).json({ error: 'Contract not found' });
+  res.json(contract);
+});
+
+// POST /api/contracts — create
+app.post('/api/contracts', (req, res) => {
+  const contracts = readContracts();
+  const now = new Date().toISOString();
+  const contract = {
+    id: generateId(),
+    contractNumber: generateContractNumber(contracts),
+    title: req.body.title || 'Untitled Contract',
+    type: req.body.type || 'other',
+    status: req.body.status || 'draft',
+    parties: req.body.parties || [],
+    startDate: req.body.startDate || null,
+    endDate: req.body.endDate || null,
+    value: parseFloat(req.body.value) || 0,
+    currency: req.body.currency || 'USD',
+    description: req.body.description || '',
+    tags: req.body.tags || [],
+    renewalReminderDays: parseInt(req.body.renewalReminderDays) || 30,
+    notes: req.body.notes || '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  contracts.push(contract);
+  writeContracts(contracts);
+  res.status(201).json(contract);
+});
+
+// PUT /api/contracts/:id — update
+app.put('/api/contracts/:id', (req, res) => {
+  const contracts = readContracts();
+  const idx = contracts.findIndex(c => c.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Contract not found' });
+
+  const allowed = ['title', 'type', 'status', 'parties', 'startDate', 'endDate',
+                   'value', 'currency', 'description', 'tags', 'renewalReminderDays', 'notes'];
+  const updated = { ...contracts[idx], updatedAt: new Date().toISOString() };
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) updated[key] = req.body[key];
+  }
+  if (req.body.value !== undefined) updated.value = parseFloat(req.body.value) || 0;
+  if (req.body.renewalReminderDays !== undefined) updated.renewalReminderDays = parseInt(req.body.renewalReminderDays) || 30;
+
+  contracts[idx] = updated;
+  writeContracts(contracts);
+  res.json(updated);
+});
+
+// DELETE /api/contracts/:id
+app.delete('/api/contracts/:id', (req, res) => {
+  const contracts = readContracts();
+  const idx = contracts.findIndex(c => c.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Contract not found' });
+  contracts.splice(idx, 1);
+  writeContracts(contracts);
+  res.json({ ok: true });
+});
+
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
