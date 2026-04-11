@@ -21,6 +21,20 @@ Server runs at `http://localhost:3000` (configurable via `PORT` in `.env`).
 
 ---
 
+## Deploying to Azure Web App
+
+> **One command** — run this on your local machine (needs [Azure CLI](https://aka.ms/installazurecli) and `git`):
+>
+> ```bash
+> chmod +x deploy.sh && ./deploy.sh
+> ```
+>
+> The script provisions all Azure resources, sets up GitHub Actions OIDC auth, does the first deployment, and prints your live URL. After that, every push to `main` auto-deploys.
+
+For full details see the [step-by-step guide](#step-by-step-azure-deployment-guide) below.
+
+---
+
 ## Contract Management System
 
 Navigate to **`/contracts.html`** after starting the server.
