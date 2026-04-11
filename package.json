@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "node server.js",
-    "start": "NODE_ENV=production node server.js",
+    "start": "node server.js",
     "tunnel": "node tunnel.js"
   },
   "keywords": [

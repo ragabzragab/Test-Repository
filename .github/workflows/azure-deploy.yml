@@ -1,0 +1,94 @@
+# ── Azure Web App Deployment ────────────────────────────────────────────────
+# Deploys to Azure App Service on every push to main/master.
+#
+# Required GitHub repository secrets (Settings → Secrets → Actions):
+#   AZURE_CLIENT_ID       – App registration client ID (from az ad sp create-for-rbac)
+#   AZURE_TENANT_ID       – Azure AD tenant ID
+#   AZURE_SUBSCRIPTION_ID – Azure subscription ID
+#   AZURE_WEBAPP_NAME     – Name of your Azure Web App (e.g. my-openai-demo)
+#
+# Quick setup (run once in Azure CLI):
+#   az ad sp create-for-rbac \
+#     --name "github-<repo>-deploy" \
+#     --role contributor \
+#     --scopes /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RG_NAME> \
+#     --sdk-auth
+#
+# Then add federated credentials so GitHub OIDC tokens are accepted:
+#   az ad app federated-credential create \
+#     --id <CLIENT_ID> \
+#     --parameters '{
+#       "name": "github-main",
+#       "issuer": "https://token.actions.githubusercontent.com",
+#       "subject": "repo:<GITHUB_ORG>/<REPO>:ref:refs/heads/main",
+#       "audiences": ["api://AzureADTokenExchange"]
+#     }'
+# ────────────────────────────────────────────────────────────────────────────
+
+name: Deploy to Azure Web App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+permissions:
+  id-token: write             # required for OIDC login
+  contents: read
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node.js setup ───────────────────────────────────────────────
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
+      # ── Azure login (OIDC — no long-lived secrets) ──────────────────
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ── Deploy to Azure Web App ─────────────────────────────────────
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          package: .
+          startup-command: 'node server.js'
+
+      # ── Verify deployment ───────────────────────────────────────────
+      - name: Verify health endpoint
+        run: |
+          APP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          echo "Checking $APP_URL/api/health ..."
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/api/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — retrying in 10s..."
+            sleep 10
+          done
+          echo "Warning: health check did not return 200 after 5 attempts (app may still be warming up)"
