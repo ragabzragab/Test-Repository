@@ -1,241 +1,198 @@
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
-import dotenv from 'dotenv';
+import http from 'http';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
-import OpenAI from 'openai';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
+const publicDir = path.join(__dirname, 'public');
 
-app.use(cors());
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+const rooms = [
+  { id: 1, name: 'Orion Hall', location: 'Floor 3', capacity: 12, amenities: ['Projector', 'Whiteboard', 'Video Conferencing'] },
+  { id: 2, name: 'Nimbus Room', location: 'Floor 1', capacity: 6, amenities: ['TV Screen', 'Speakerphone'] }
+];
 
-const upload = multer({ dest: path.join(__dirname, 'uploads') });
+const bookings = [
+  { id: 1, roomId: 1, title: 'Weekly Product Sync', organizer: 'Alex', attendees: 9, startTime: '2026-01-12T09:00:00.000Z', endTime: '2026-01-12T10:00:00.000Z' }
+];
 
-// Serve static frontend
-app.use(express.static(path.join(__dirname, 'public')));
+let nextRoomId = 3;
+let nextBookingId = 2;
 
-function getModel(defaultModel) {
-  return process.env.OPENAI_MODEL || defaultModel;
+function sendJson(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
+  res.end(JSON.stringify(data));
 }
 
-function getOpenAIClientFromRequest(req) {
-  const apiKey = req.header('x-openai-key') || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('Missing OpenAI API Key. Set OPENAI_API_KEY in server env or pass x-openai-key header.');
-  }
-  return new OpenAI({ apiKey });
+function sendNoContent(res) {
+  res.writeHead(204, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
+  res.end();
 }
 
-// 1) Chat Completions / Responses
-app.post('/api/chat', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { messages, model } = req.body;
-    const response = await openai.chat.completions.create({
-      model: model || getModel('gpt-4o-mini'),
-      messages: messages || [{ role: 'user', content: 'Say hello!' }],
-      temperature: 0.7
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 1_000_000) {
+        reject(new Error('Payload too large'));
+      }
     });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 2) Responses (single-turn convenience)
-app.post('/api/respond', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { prompt, model } = req.body;
-    const response = await openai.responses.create({
-      model: model || getModel('gpt-4o-mini'),
-      input: prompt || 'Write a short poem about the sea.'
+    req.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('Invalid JSON payload'));
+      }
     });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
+    req.on('error', reject);
+  });
+}
+
+function parseDate(value) {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function overlaps(roomId, start, end) {
+  return bookings.some((booking) => booking.roomId === roomId && start < new Date(booking.endTime) && end > new Date(booking.startTime));
+}
+
+function withRoom(booking) {
+  return { ...booking, room: rooms.find((room) => room.id === booking.roomId) || null };
+}
+
+function serveStatic(req, res, pathname) {
+  const requested = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const filePath = path.join(publicDir, requested);
+  if (!filePath.startsWith(publicDir)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
   }
-});
 
-// 3) Vision (image understanding via chat with image url)
-app.post('/api/vision', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { imageUrl, question, model } = req.body;
-    const response = await openai.chat.completions.create({
-      model: model || getModel('gpt-4o-mini'),
-      messages: [
-        { role: 'user', content: [
-          { type: 'text', text: question || 'Describe this image.' },
-          { type: 'image_url', image_url: { url: imageUrl } }
-        ]}
-      ]
-    });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 4) Image generation
-app.post('/api/images/generate', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { prompt, model } = req.body;
-    const response = await openai.images.generate({
-      model: model || 'gpt-image-1',
-      prompt: prompt || 'A cute baby sea otter'
-    });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 5) Image edit (requires base image and optional mask)
-app.post('/api/images/edit', upload.fields([{ name: 'image' }, { name: 'mask', maxCount: 1 }]), async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const prompt = req.body.prompt || 'Add a red hat';
-    const model = req.body.model || 'gpt-image-1';
-
-    const imagePath = req.files?.image?.[0]?.path;
-    if (!imagePath) throw new Error('Missing required image file.');
-    const maskPath = req.files?.mask?.[0]?.path;
-
-    const imageStream = fs.createReadStream(imagePath);
-    const maskStream = maskPath ? fs.createReadStream(maskPath) : undefined;
-
-    // Some SDKs use openai.images.edit; others use openai.images.edits.create
-    let response;
-    if (openai.images.edit) {
-      response = await openai.images.edit({ model, prompt, image: imageStream, mask: maskStream });
-    } else if (openai.images?.edits?.create) {
-      response = await openai.images.edits.create({ model, prompt, image: imageStream, mask: maskStream });
-    } else {
-      throw new Error('Image edit not supported by this SDK version');
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      res.end('Not Found');
+      return;
     }
 
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
+    const ext = path.extname(filePath);
+    const type = ext === '.html' ? 'text/html' : ext === '.css' ? 'text/css' : ext === '.js' ? 'application/javascript' : 'text/plain';
+    res.writeHead(200, { 'Content-Type': type });
+    res.end(data);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+
+  if (req.method === 'OPTIONS') {
+    return sendNoContent(res);
   }
-});
 
-// 6) Image variation (requires base image)
-app.post('/api/images/variations', upload.single('image'), async (req, res) => {
   try {
-    const openai = getOpenAIClientFromRequest(req);
-    const model = req.body.model || 'gpt-image-1';
-    const imagePath = req.file?.path;
-    if (!imagePath) throw new Error('Missing required image file.');
-    const imageStream = fs.createReadStream(imagePath);
+    if (req.method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
 
-    let response;
-    if (openai.images?.variations?.create) {
-      response = await openai.images.variations.create({ model, image: imageStream });
-    } else if (openai.images?.variations) {
-      response = await openai.images.variations({ model, image: imageStream });
-    } else {
-      throw new Error('Image variations not supported by this SDK version');
+    if (req.method === 'GET' && pathname === '/api/rooms') return sendJson(res, 200, rooms);
+
+    if (req.method === 'POST' && pathname === '/api/rooms') {
+      const { name, location, capacity, amenities } = await parseBody(req);
+      if (!name || !location || !Number.isFinite(capacity) || capacity < 1) return sendJson(res, 400, { error: 'Invalid room payload. name, location, and capacity are required.' });
+
+      const room = {
+        id: nextRoomId++,
+        name: String(name).trim(),
+        location: String(location).trim(),
+        capacity: Math.floor(capacity),
+        amenities: Array.isArray(amenities) ? amenities.map((item) => String(item).trim()).filter(Boolean) : []
+      };
+
+      rooms.push(room);
+      return sendJson(res, 201, room);
     }
 
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 7) Speech-to-Text (transcriptions)
-app.post('/api/audio/transcriptions', upload.single('audio'), async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const model = req.body.model || 'gpt-4o-transcribe';
-    const audioPath = req.file?.path;
-    if (!audioPath) throw new Error('Missing required audio file.');
-    const audioStream = fs.createReadStream(audioPath);
-
-    let response;
-    try {
-      response = await openai.audio.transcriptions.create({ model, file: audioStream });
-    } catch (e) {
-      // Fallback to whisper-1 if model unavailable
-      response = await openai.audio.transcriptions.create({ model: 'whisper-1', file: audioStream });
+    if (req.method === 'DELETE' && pathname.startsWith('/api/rooms/')) {
+      const roomId = Number(pathname.split('/').pop());
+      const index = rooms.findIndex((room) => room.id === roomId);
+      if (index === -1) return sendJson(res, 404, { error: 'Room not found.' });
+      if (bookings.some((booking) => booking.roomId === roomId)) return sendJson(res, 400, { error: 'Cannot delete room with existing bookings.' });
+      rooms.splice(index, 1);
+      return sendNoContent(res);
     }
 
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
+    if (req.method === 'GET' && pathname === '/api/bookings') {
+      const date = url.searchParams.get('date');
+      const filtered = date ? bookings.filter((booking) => booking.startTime.startsWith(date)) : bookings;
+      return sendJson(res, 200, filtered.map(withRoom).sort((a, b) => new Date(a.startTime) - new Date(b.startTime)));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/bookings') {
+      const { roomId, title, organizer, attendees, startTime, endTime } = await parseBody(req);
+      const room = rooms.find((entry) => entry.id === Number(roomId));
+      if (!room) return sendJson(res, 404, { error: 'Room not found.' });
+      if (!title || !organizer) return sendJson(res, 400, { error: 'title and organizer are required.' });
+      if (!Number.isFinite(attendees) || attendees < 1) return sendJson(res, 400, { error: 'attendees must be a positive number.' });
+      if (attendees > room.capacity) return sendJson(res, 400, { error: 'attendees exceed room capacity.' });
+
+      const start = parseDate(startTime);
+      const end = parseDate(endTime);
+      if (!start || !end || start >= end) return sendJson(res, 400, { error: 'Invalid date range.' });
+      if (overlaps(room.id, start, end)) return sendJson(res, 409, { error: 'Room is already booked during that time.' });
+
+      const booking = {
+        id: nextBookingId++,
+        roomId: room.id,
+        title: String(title).trim(),
+        organizer: String(organizer).trim(),
+        attendees: Math.floor(attendees),
+        startTime: start.toISOString(),
+        endTime: end.toISOString()
+      };
+      bookings.push(booking);
+      return sendJson(res, 201, booking);
+    }
+
+    if (req.method === 'DELETE' && pathname.startsWith('/api/bookings/')) {
+      const bookingId = Number(pathname.split('/').pop());
+      const index = bookings.findIndex((booking) => booking.id === bookingId);
+      if (index === -1) return sendJson(res, 404, { error: 'Booking not found.' });
+      bookings.splice(index, 1);
+      return sendNoContent(res);
+    }
+
+    if (req.method === 'GET' && pathname === '/api/dashboard') {
+      const now = new Date();
+      const activeBookings = bookings.filter((booking) => new Date(booking.startTime) <= now && new Date(booking.endTime) >= now).length;
+      const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
+      const reservedSeats = bookings.reduce((sum, booking) => sum + booking.attendees, 0);
+      return sendJson(res, 200, { totalRooms: rooms.length, totalBookings: bookings.length, activeBookings, totalCapacity, reservedSeats });
+    }
+
+    if (!pathname.startsWith('/api/')) {
+      return serveStatic(req, res, pathname);
+    }
+
+    sendJson(res, 404, { error: 'Route not found.' });
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || 'Request failed.' });
   }
 });
 
-// 8) Text-to-Speech (TTS)
-app.post('/api/audio/speech', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { input, voice, model, format } = req.body;
-    const fmt = (format || 'mp3').toLowerCase();
-    const response = await openai.audio.speech.create({
-      model: model || 'gpt-4o-mini-tts',
-      voice: voice || 'alloy',
-      input: input || 'Hello from OpenAI TTS',
-      format: fmt
-    });
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = fmt === 'wav' ? 'audio/wav' : (fmt === 'ogg' ? 'audio/ogg' : 'audio/mpeg');
-    res.setHeader('Content-Type', contentType);
-    res.send(buffer);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 9) Embeddings
-app.post('/api/embeddings', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { input, model } = req.body;
-    const response = await openai.embeddings.create({
-      model: model || 'text-embedding-3-small',
-      input: input || 'Hello world'
-    });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// 10) Moderations
-app.post('/api/moderations', async (req, res) => {
-  try {
-    const openai = getOpenAIClientFromRequest(req);
-    const { input, model } = req.body;
-    const response = await openai.moderations.create({
-      model: model || 'omni-moderation-latest',
-      input: input || 'I want to hurt someone'
-    });
-    res.json(response);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+server.listen(port, () => {
+  console.log(`Meeting room system running at http://localhost:${port}`);
 });

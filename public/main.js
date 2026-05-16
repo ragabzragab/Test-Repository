@@ -1,219 +1,200 @@
-function getApiKey() {
-  return localStorage.getItem('openai_key') || '';
-}
-function setApiKey(k) {
-  localStorage.setItem('openai_key', k);
+const statusEl = document.getElementById('status');
+const statsGrid = document.getElementById('stats-grid');
+const roomList = document.getElementById('room-list');
+const bookingList = document.getElementById('booking-list');
+const bookingRoom = document.getElementById('booking-room');
+const filterDate = document.getElementById('filter-date');
+
+let rooms = [];
+let bookings = [];
+
+function setStatus(message, isError = false) {
+  statusEl.textContent = message;
+  statusEl.className = isError ? 'error' : 'success';
+  setTimeout(() => {
+    statusEl.textContent = '';
+    statusEl.className = '';
+  }, 2500);
 }
 
-const savedKeyInput = document.getElementById('api_key');
-const saveKeyBtn = document.getElementById('save_key');
-const keyStatus = document.getElementById('key_status');
+async function request(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options
+  });
 
-if (savedKeyInput) {
-  savedKeyInput.value = getApiKey();
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(error.error || 'Request failed');
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
 }
-if (saveKeyBtn) {
-  saveKeyBtn.onclick = () => {
-    setApiKey(savedKeyInput.value.trim());
-    keyStatus.textContent = savedKeyInput.value ? 'Saved locally' : 'Cleared';
-    setTimeout(() => keyStatus.textContent = '', 2000);
+
+function renderStats(stats) {
+  const fields = [
+    ['Total Rooms', stats.totalRooms],
+    ['Total Bookings', stats.totalBookings],
+    ['Active Bookings', stats.activeBookings],
+    ['Total Capacity', stats.totalCapacity],
+    ['Reserved Seats', stats.reservedSeats]
+  ];
+
+  statsGrid.innerHTML = fields
+    .map(([label, value]) => `<article class="stat-card"><h3>${value}</h3><p>${label}</p></article>`)
+    .join('');
+}
+
+function renderRooms() {
+  bookingRoom.innerHTML = rooms
+    .map((room) => `<option value="${room.id}">${room.name} (${room.capacity} seats)</option>`)
+    .join('');
+
+  roomList.innerHTML = rooms
+    .map(
+      (room) => `
+      <article class="list-item">
+        <div>
+          <h3>${room.name}</h3>
+          <p>${room.location} • Capacity: ${room.capacity}</p>
+          <p class="muted">${room.amenities.length ? room.amenities.join(', ') : 'No amenities listed'}</p>
+        </div>
+        <button class="danger" data-room-delete="${room.id}">Delete</button>
+      </article>
+    `
+    )
+    .join('');
+}
+
+function renderBookings() {
+  bookingList.innerHTML = bookings
+    .map((booking) => {
+      const start = new Date(booking.startTime).toLocaleString();
+      const end = new Date(booking.endTime).toLocaleString();
+      return `
+        <article class="list-item">
+          <div>
+            <h3>${booking.title}</h3>
+            <p>${booking.room?.name || 'Unknown room'} • ${booking.organizer}</p>
+            <p>${start} - ${end}</p>
+            <p class="muted">Attendees: ${booking.attendees}</p>
+          </div>
+          <button class="danger" data-booking-delete="${booking.id}">Cancel</button>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+async function refreshDashboard() {
+  const stats = await request('/api/dashboard');
+  renderStats(stats);
+}
+
+async function refreshRooms() {
+  rooms = await request('/api/rooms');
+  renderRooms();
+}
+
+async function refreshBookings(dateFilter = '') {
+  const query = dateFilter ? `?date=${dateFilter}` : '';
+  bookings = await request(`/api/bookings${query}`);
+  renderBookings();
+}
+
+async function bootstrap() {
+  await Promise.all([refreshDashboard(), refreshRooms(), refreshBookings()]);
+}
+
+document.getElementById('room-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const payload = {
+    name: document.getElementById('room-name').value.trim(),
+    location: document.getElementById('room-location').value.trim(),
+    capacity: Number(document.getElementById('room-capacity').value),
+    amenities: document.getElementById('room-amenities').value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
   };
-}
 
-async function postJSON(url, data) {
-  const headers = { 'Content-Type': 'application/json' };
-  const key = getApiKey();
-  if (key) headers['x-openai-key'] = key;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(data)
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-function showJSON(el, data) {
-  el.textContent = JSON.stringify(data, null, 2);
-}
-
-// 1) Chat
-const chatBtn = document.getElementById('chat_btn');
-chatBtn.onclick = async () => {
-  const out = document.getElementById('chat_out');
-  out.textContent = 'Loading...';
   try {
-    const input = document.getElementById('chat_input').value || 'Say hello!';
-    const resp = await postJSON('/api/chat', {
-      messages: [{ role: 'user', content: input }]
-    });
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
+    await request('/api/rooms', { method: 'POST', body: JSON.stringify(payload) });
+    event.target.reset();
+    await Promise.all([refreshRooms(), refreshDashboard()]);
+    setStatus('Room added successfully.');
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
 
-// 2) Responses
-const respBtn = document.getElementById('resp_btn');
-respBtn.onclick = async () => {
-  const out = document.getElementById('resp_out');
-  out.textContent = 'Loading...';
-  try {
-    const prompt = document.getElementById('resp_prompt').value || 'Write a haiku about the moon.';
-    const resp = await postJSON('/api/respond', { prompt });
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
+document.getElementById('booking-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
 
-// 3) Vision
-const visionBtn = document.getElementById('vision_btn');
-visionBtn.onclick = async () => {
-  const out = document.getElementById('vision_out');
-  out.textContent = 'Loading...';
-  try {
-    const imageUrl = document.getElementById('vision_img').value;
-    const question = document.getElementById('vision_q').value || 'What is in this image?';
-    const resp = await postJSON('/api/vision', { imageUrl, question });
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
+  const payload = {
+    roomId: Number(document.getElementById('booking-room').value),
+    title: document.getElementById('booking-title').value.trim(),
+    organizer: document.getElementById('booking-organizer').value.trim(),
+    attendees: Number(document.getElementById('booking-attendees').value),
+    startTime: new Date(document.getElementById('booking-start').value).toISOString(),
+    endTime: new Date(document.getElementById('booking-end').value).toISOString()
+  };
 
-// 4) Image generation
-const imgBtn = document.getElementById('img_btn');
-imgBtn.onclick = async () => {
-  const out = document.getElementById('img_out');
-  out.textContent = 'Generating...';
   try {
-    const prompt = document.getElementById('img_prompt').value || 'A cute baby sea otter';
-    const resp = await postJSON('/api/images/generate', { prompt });
-    out.textContent = '';
-    const data = resp.data?.[0];
-    if (data?.url) {
-      const img = document.createElement('img');
-      img.src = data.url;
-      out.appendChild(img);
-    } else if (data?.b64_json) {
-      const img = document.createElement('img');
-      img.src = 'data:image/png;base64,' + data.b64_json;
-      out.appendChild(img);
-    } else {
-      showJSON(out, resp);
+    await request('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
+    event.target.reset();
+    await Promise.all([refreshBookings(filterDate.value), refreshDashboard()]);
+    setStatus('Booking created successfully.');
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+document.getElementById('filter-btn').addEventListener('click', async () => {
+  try {
+    await refreshBookings(filterDate.value);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+document.getElementById('clear-filter-btn').addEventListener('click', async () => {
+  filterDate.value = '';
+  try {
+    await refreshBookings();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  const roomId = event.target.dataset.roomDelete;
+  const bookingId = event.target.dataset.bookingDelete;
+
+  if (roomId) {
+    try {
+      await request(`/api/rooms/${roomId}`, { method: 'DELETE' });
+      await Promise.all([refreshRooms(), refreshDashboard()]);
+      setStatus('Room deleted successfully.');
+    } catch (error) {
+      setStatus(error.message, true);
     }
-  } catch (e) { out.textContent = e.message; }
-};
+  }
 
-// 5) Image edit
-const imgeditBtn = document.getElementById('imgedit_btn');
-imgeditBtn.onclick = async () => {
-  const out = document.getElementById('imgedit_out');
-  out.textContent = 'Editing...';
-  try {
-    const prompt = document.getElementById('imgedit_prompt').value || 'Add a red hat';
-    const imgFile = document.getElementById('imgedit_image').files[0];
-    const maskFile = document.getElementById('imgedit_mask').files[0];
-    const fd = new FormData();
-    fd.append('prompt', prompt);
-    if (imgFile) fd.append('image', imgFile);
-    if (maskFile) fd.append('mask', maskFile);
-    const key = getApiKey();
-    const res = await fetch('/api/images/edit', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
-    const resp = await res.json();
-    out.textContent = '';
-    const data = resp.data?.[0];
-    if (data?.url) {
-      const img = document.createElement('img');
-      img.src = data.url;
-      out.appendChild(img);
-    } else if (data?.b64_json) {
-      const img = document.createElement('img');
-      img.src = 'data:image/png;base64,' + data.b64_json;
-      out.appendChild(img);
-    } else {
-      showJSON(out, resp);
+  if (bookingId) {
+    try {
+      await request(`/api/bookings/${bookingId}`, { method: 'DELETE' });
+      await Promise.all([refreshBookings(filterDate.value), refreshDashboard()]);
+      setStatus('Booking cancelled successfully.');
+    } catch (error) {
+      setStatus(error.message, true);
     }
-  } catch (e) { out.textContent = e.message; }
-};
+  }
+});
 
-// 6) Image variations
-const imgvarBtn = document.getElementById('imgvar_btn');
-imgvarBtn.onclick = async () => {
-  const out = document.getElementById('imgvar_out');
-  out.textContent = 'Creating variations...';
-  try {
-    const imgFile = document.getElementById('imgvar_image').files[0];
-    const fd = new FormData();
-    if (imgFile) fd.append('image', imgFile);
-    const key = getApiKey();
-    const res = await fetch('/api/images/variations', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
-    const resp = await res.json();
-    out.textContent = '';
-    const data = resp.data?.[0];
-    if (data?.url) {
-      const img = document.createElement('img');
-      img.src = data.url;
-      out.appendChild(img);
-    } else if (data?.b64_json) {
-      const img = document.createElement('img');
-      img.src = 'data:image/png;base64,' + data.b64_json;
-      out.appendChild(img);
-    } else {
-      showJSON(out, resp);
-    }
-  } catch (e) { out.textContent = e.message; }
-};
-
-// 7) Speech to Text
-const sttBtn = document.getElementById('stt_btn');
-sttBtn.onclick = async () => {
-  const out = document.getElementById('stt_out');
-  out.textContent = 'Transcribing...';
-  try {
-    const audioFile = document.getElementById('stt_audio').files[0];
-    const fd = new FormData();
-    if (audioFile) fd.append('audio', audioFile);
-    const key = getApiKey();
-    const res = await fetch('/api/audio/transcriptions', { method: 'POST', body: fd, headers: key ? { 'x-openai-key': key } : {} });
-    const resp = await res.json();
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
-
-// 8) Text to Speech
-const ttsBtn = document.getElementById('tts_btn');
-ttsBtn.onclick = async () => {
-  const audio = document.getElementById('tts_audio');
-  const text = document.getElementById('tts_text').value || 'Hello from OpenAI TTS';
-  const headers = { 'Content-Type': 'application/json' };
-  const key = getApiKey();
-  if (key) headers['x-openai-key'] = key;
-  const res = await fetch('/api/audio/speech', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ input: text })
-  });
-  const blob = await res.blob();
-  audio.src = URL.createObjectURL(blob);
-  audio.play();
-};
-
-// 9) Embeddings
-const embBtn = document.getElementById('emb_btn');
-embBtn.onclick = async () => {
-  const out = document.getElementById('emb_out');
-  out.textContent = 'Embedding...';
-  try {
-    const input = document.getElementById('emb_input').value || 'Hello world';
-    const resp = await postJSON('/api/embeddings', { input });
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
-
-// 10) Moderations
-const modBtn = document.getElementById('mod_btn');
-modBtn.onclick = async () => {
-  const out = document.getElementById('mod_out');
-  out.textContent = 'Checking...';
-  try {
-    const input = document.getElementById('mod_input').value || 'I want to hurt someone';
-    const resp = await postJSON('/api/moderations', { input });
-    showJSON(out, resp);
-  } catch (e) { out.textContent = e.message; }
-};
+bootstrap().catch((error) => setStatus(error.message, true));

@@ -3,96 +3,65 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenAI Top 10 API Demo</title>
+  <title>Meeting Room Management</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <header>
-    <h1>OpenAI Top 10 API Demo</h1>
-    <p>Enter your input and try the APIs. Set your <code>OPENAI_API_KEY</code> in the server environment or paste it below (stored only in your browser).</p>
-    <div class="keybox">
-      <input id="api_key" placeholder="Paste your OpenAI API Key (sk-...)" />
-      <button id="save_key">Save Key</button>
-      <span id="key_status"></span>
-    </div>
+    <h1>Meeting Room Management System</h1>
+    <p>Manage conference rooms, create bookings, and monitor occupancy in one dashboard.</p>
   </header>
 
-  <main id="app">
-    <section class="card" id="chat">
-      <h2>1) Chat</h2>
-      <p>Multi-turn chat style responses.</p>
-      <textarea id="chat_input" placeholder="Ask something..."></textarea>
-      <button id="chat_btn">Send</button>
-      <pre id="chat_out"></pre>
+  <main>
+    <section class="panel stats">
+      <h2>Dashboard</h2>
+      <div id="stats-grid" class="stats-grid"></div>
     </section>
 
-    <section class="card" id="respond">
-      <h2>2) Responses</h2>
-      <p>Single-turn prompt to text response.</p>
-      <input id="resp_prompt" placeholder="Prompt" />
-      <button id="resp_btn">Run</button>
-      <pre id="resp_out"></pre>
+    <section class="panel two-column">
+      <div>
+        <h2>Create Room</h2>
+        <form id="room-form" class="stacked-form">
+          <input id="room-name" placeholder="Room name" required />
+          <input id="room-location" placeholder="Location (e.g., Floor 2)" required />
+          <input id="room-capacity" type="number" min="1" placeholder="Capacity" required />
+          <input id="room-amenities" placeholder="Amenities (comma-separated)" />
+          <button type="submit">Add Room</button>
+        </form>
+      </div>
+      <div>
+        <h2>Rooms</h2>
+        <div id="room-list" class="list"></div>
+      </div>
     </section>
 
-    <section class="card" id="vision">
-      <h2>3) Vision</h2>
-      <p>Ask about an image by URL.</p>
-      <input id="vision_img" placeholder="Image URL" />
-      <input id="vision_q" placeholder="Question" />
-      <button id="vision_btn">Analyze</button>
-      <pre id="vision_out"></pre>
+    <section class="panel two-column">
+      <div>
+        <h2>Create Booking</h2>
+        <form id="booking-form" class="stacked-form">
+          <select id="booking-room" required></select>
+          <input id="booking-title" placeholder="Meeting title" required />
+          <input id="booking-organizer" placeholder="Organizer" required />
+          <input id="booking-attendees" type="number" min="1" placeholder="Attendees" required />
+          <label>Start time</label>
+          <input id="booking-start" type="datetime-local" required />
+          <label>End time</label>
+          <input id="booking-end" type="datetime-local" required />
+          <button type="submit">Book Room</button>
+        </form>
+      </div>
+      <div>
+        <h2>Bookings</h2>
+        <div class="row controls">
+          <input id="filter-date" type="date" />
+          <button id="filter-btn" type="button">Filter</button>
+          <button id="clear-filter-btn" type="button" class="secondary">Clear</button>
+        </div>
+        <div id="booking-list" class="list"></div>
+      </div>
     </section>
 
-    <section class="card" id="imggen">
-      <h2>4) Image Generation</h2>
-      <input id="img_prompt" placeholder="Describe the image to generate" />
-      <button id="img_btn">Generate</button>
-      <div id="img_out"></div>
-    </section>
-
-    <section class="card" id="imgedit">
-      <h2>5) Image Edit</h2>
-      <input id="imgedit_prompt" placeholder="Edit instruction" />
-      <input type="file" id="imgedit_image" accept="image/*" />
-      <input type="file" id="imgedit_mask" accept="image/*" />
-      <button id="imgedit_btn">Edit</button>
-      <div id="imgedit_out"></div>
-    </section>
-
-    <section class="card" id="imgvar">
-      <h2>6) Image Variations</h2>
-      <input type="file" id="imgvar_image" accept="image/*" />
-      <button id="imgvar_btn">Create Variations</button>
-      <div id="imgvar_out"></div>
-    </section>
-
-    <section class="card" id="stt">
-      <h2>7) Speech to Text</h2>
-      <input type="file" id="stt_audio" accept="audio/*" />
-      <button id="stt_btn">Transcribe</button>
-      <pre id="stt_out"></pre>
-    </section>
-
-    <section class="card" id="tts">
-      <h2>8) Text to Speech</h2>
-      <input id="tts_text" placeholder="Text to speak" />
-      <button id="tts_btn">Speak</button>
-      <audio id="tts_audio" controls></audio>
-    </section>
-
-    <section class="card" id="emb">
-      <h2>9) Embeddings</h2>
-      <input id="emb_input" placeholder="Text to embed" />
-      <button id="emb_btn">Embed</button>
-      <pre id="emb_out"></pre>
-    </section>
-
-    <section class="card" id="mod">
-      <h2>10) Moderations</h2>
-      <input id="mod_input" placeholder="Text to moderate" />
-      <button id="mod_btn">Check</button>
-      <pre id="mod_out"></pre>
-    </section>
+    <p id="status" aria-live="polite"></p>
   </main>
 
   <script src="/main.js"></script>
