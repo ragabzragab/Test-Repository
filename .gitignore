@@ -1,4 +1,17 @@
-# Build Folders (you can keep bin if you'd like, to store dlls and pdbs)
+# Dependencies
+node_modules/
+
+# Secrets and local config (use .env.example as the template)
+.env
+.env.*
+!.env.example
+
+# Logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
+
+# Build folders
 bin
 obj
 
