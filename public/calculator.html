@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculator</title>
+  <link rel="stylesheet" href="calculator.css">
+</head>
+<body>
+  <main class="calc">
+    <div class="display">
+      <div id="expr" class="expr"></div>
+      <div id="result" class="result">0</div>
+    </div>
+    <div class="keys">
+      <button data-action="clear" class="fn">AC</button>
+      <button data-action="back" class="fn">⌫</button>
+      <button data-key="%" class="fn">%</button>
+      <button data-key="/" class="op">÷</button>
+      <button data-key="7">7</button>
+      <button data-key="8">8</button>
+      <button data-key="9">9</button>
+      <button data-key="*" class="op">×</button>
+      <button data-key="4">4</button>
+      <button data-key="5">5</button>
+      <button data-key="6">6</button>
+      <button data-key="-" class="op">−</button>
+      <button data-key="1">1</button>
+      <button data-key="2">2</button>
+      <button data-key="3">3</button>
+      <button data-key="+" class="op">+</button>
+      <button data-key="0" class="wide">0</button>
+      <button data-key=".">.</button>
+      <button data-action="equals" class="eq">=</button>
+    </div>
+  </main>
+  <script src="calculator.js"></script>
+</body>
+</html>
